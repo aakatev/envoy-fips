@@ -1,21 +1,28 @@
-ARG BUILDER_IMAGE_NAME=envoyproxy/envoy-build-ubuntu:b480535e8423b5fd7c102fd30c92f4785519e33a
+ARG BUILDER_IMAGE_NAME=envoyproxy/envoy-build-ubuntu:105fdc54acc55ff0ff0c5b784d8cfe8dc225aad4
 
-FROM ${BUILDER_IMAGE_NAME} as builder
+FROM ${BUILDER_IMAGE_NAME} AS builder
 
-ARG ENVOY_BRANCH=release/v1.16
-ARG ENVOY_REPO=https://github.com/envoyproxy/envoy.git
+ARG ENVOY_BRANCH=v1.27-fips
+ARG ENVOY_REPO=https://github.com/ctera/envoy.git
 
-RUN git clone --depth 1 --branch ${ENVOY_BRANCH} ${ENVOY_REPO} /source
+RUN /usr/bin/git clone --depth 1 --branch ${ENVOY_BRANCH} ${ENVOY_REPO} /source
 WORKDIR /source
+
+RUN git pull
 
 RUN mkdir /build
 
 ENV BAZEL_BUILD_OPTIONS='--define boringssl=fips'
-RUN ./ci/do_ci.sh bazel.release.server_only
+RUN ./ci/do_ci.sh bazel.release.contrib.server_only
 
+FROM envoyproxy/envoy-alpine:v1.21-latest
+WORKDIR /usr/local/bin
 
-FROM ubuntu
+COPY --from=builder /source/linux/amd64/build_envoy-contrib_release_stripped/envoy /usr/local/bin/envoy
+COPY --from=builder /source/linux/amd64/build_envoy-contrib_release/su-exec /usr/local/bin/su-exec
+COPY docker-entrypoint.sh /
 
-COPY --from=builder /build/envoy/source/exe/envoy /usr/bin/envoy
+RUN mkdir -p /etc/envoy && \
+  chmod +x /docker-entrypoint.sh
 
-ENTRYPOINT [ "/usr/bin/envoy", "-c", "/etc/envoy/envoy.yaml" ]
+ENTRYPOINT ["/docker-entrypoint.sh"]
